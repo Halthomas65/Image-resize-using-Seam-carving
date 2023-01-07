@@ -277,7 +277,7 @@ void seamCarvingByDevice(uchar3 *inPixels, int width, int height, int targetWidt
     int * leastSignificantPixel = (int *)malloc(height * sizeof(int));
     int * score = (int *)malloc(width * height * sizeof(int));
 
-    // dynamically sized smem used to compute priority
+    // dynamically sized smem used to compute pcriority
     size_t smemSize = ((blockSize.x + 3 - 1) * (blockSize.y + 3 - 1)) * sizeof(uint8_t);
     
     // block size use to calculate seam score table

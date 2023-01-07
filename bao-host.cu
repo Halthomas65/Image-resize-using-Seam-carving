@@ -177,6 +177,7 @@ void convertRgb2Gray(uchar3 * inPixels, int width, int height, uint8_t * outPixe
     }
 }
 
+// compute min seam table
 void computeSeamScoreTable(int *priority, int *score, int width, int height, int originalWidth) {
     for (int c = 0; c < width; ++c) {
         score[c] = priority[c];
