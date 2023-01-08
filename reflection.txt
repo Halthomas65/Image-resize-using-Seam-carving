@@ -3,5 +3,11 @@ Each member: What have you learned?
 *** Quang ***
 ->
 *** Hào ***
-->
+-> Difficulties: 
+    - Finding a different way to upgrade the code
+    - Synchronizing the threads 
+    - Implementing the upgrading ideas
+   Learned: 
+    - Better use of SMEM and streams
+    
 *** Đạt ***
