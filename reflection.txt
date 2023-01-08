@@ -1,7 +1,13 @@
 Each member: What difficulties have you encountered?
 Each member: What have you learned?
 *** Quang ***
-->
+-> Difficulties:
+    - Synchronizing the threads in parallel
+    - A long time for the idea to upgrade the code
+    - Parallelize the code for the idea of an error
+-> Learned:
+    - Understand seam algorithm
+    - Better understand how to parallelize
 *** Hào ***
 -> Difficulties: 
     - Finding a different way to upgrade the code
