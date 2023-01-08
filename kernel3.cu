@@ -80,24 +80,6 @@ void readPnm(char * fileName, int &width, int &height, uchar3 * &pixels)
 	fclose(f);
 }
 
-// void writePnm(uint32_t * pixels, int width, int height, char * fileName)
-// {
-// 	FILE * f = fopen(fileName, "w");
-// 	if (f == NULL)
-// 	{
-// 		printf("Cannot write %s\n", fileName);
-// 		exit(EXIT_FAILURE);
-// 	}
-
-// 	fprintf(f, "P2\n");
-// 	fprintf(f, "%i\n%i\n255\n", width, height); 
-
-// 	for (int i = 0; i < width * height; i++)
-// 		fprintf(f, "%hhu\n", pixels[i]);
-
-// 	fclose(f);
-// }
-
 void writePnm(uchar3 * pixels, int width, int height, char * fileName)
 {
 	FILE * f = fopen(fileName, "w");
@@ -123,6 +105,25 @@ char * concatStr(const char * s1, const char * s2)
 	return result;
 }
 
+__global__ void convertRgb2GrayKernel1 (uchar3 * inPixels, int width, int height, uint8_t * outPixels) {
+    // Reminder: gray = 0.299*red + 0.587*green + 0.114*blue  
+    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < height && c < width) {
+		int i = r * width + c;
+				
+		uint32_t r = inPixels[i].x;
+		uint32_t g = inPixels[i].y;
+		uint32_t b = inPixels[i].z;
+		outPixels[i] = 0.299f * r + 0.587f * g + 0.114f * b;
+    }
+}
+
+__global__ void convertRgb2GrayKernel2(uchar3 * inPixels, int width, int height, uint8_t * outPixels) {
+	// TODO
+	// Used streams to overlap memory transfer and computation
+}
+
 void convertRgb2Gray(uchar3 *inPixels, int width, int height, uint32_t *outPixels)
 {
     for (int row = 0; row < height; row++)
@@ -138,7 +139,8 @@ void convertRgb2Gray(uchar3 *inPixels, int width, int height, uint32_t *outPixel
     }
 }
 
-void calConvolution(uint32_t *inPixels, int width, int height, uint32_t *outPixels, const int* filter)
+void calConvolution(uint32_t *inPixels, int width, int height, uint32_t *outPixels,
+				 const int* filter)
 {
 	for (int outPixelsR = 0; outPixelsR < height; outPixelsR++)
 	{
@@ -163,6 +165,49 @@ void calConvolution(uint32_t *inPixels, int width, int height, uint32_t *outPixe
 			outPixels[outPixelsR*width + outPixelsC] = outPixel;
 		}
 	}
+}
+
+__global__ void calConvolutionKernel1(uint32_t *inPixels, int width, int height,
+				uint32_t *outPixels, const int* filter)
+{
+	int outPixelsR = blockIdx.y * blockDim.y + threadIdx.y;
+	int outPixelsC = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (outPixelsR < height && outPixelsC < width)
+	{
+		uint32_t outPixel = 0;
+		for (int filterR = 0; filterR < FILTER_WIDTH; filterR++)
+		{
+			for (int filterC = 0; filterC < FILTER_WIDTH; filterC++)
+			{
+				float filterVal = filter[filterR*FILTER_WIDTH + filterC];
+				int inPixelsR = outPixelsR - FILTER_WIDTH/2 + filterR;
+				int inPixelsC = outPixelsC - FILTER_WIDTH/2 + filterC;
+
+				inPixelsR = min(max(0, inPixelsR), height - 1);
+				inPixelsC = min(max(0, inPixelsC), width - 1);
+
+				uint32_t inPixel = inPixels[inPixelsR * width + inPixelsC];
+				outPixel += uint32_t(filterVal * inPixel);
+			}
+		}
+		outPixels[outPixelsR*width + outPixelsC] = outPixel;
+	}
+}
+
+__global__ void calConvolutionKernel2(uint32_t *inPixels, int width, int height,
+				uint32_t *outPixels, const int* filter)
+{
+	// TODO
+	// Used SMEM
+}
+
+__global__ void calConvolutionKernel3(uint32_t *inPixels, int width, int height,
+				uint32_t *outPixels, const int* filter)
+{
+	// TODO
+	// Used SMEM
+	// Used streams to overlap memory transfer and computation
 }
 
 void calcPixelImportance(uint32_t *inPixels, int width, int height, uint32_t *importanceMatrix) 
@@ -262,17 +307,15 @@ void seamCarvingByHost(uchar3 * inPixels, int width, int height, int nSeams, uch
 	int expectWidth = width - nSeams;
 	int temp = width;
 
-	// Chuyển anh sang grayscale
-	uint32_t *grayscale = (uint32_t *)malloc(width * height * sizeof(uint32_t));
-	convertRgb2Gray(src_img, width, height, grayscale);
-
 	while (width > expectWidth) {
 		if (width < temp){
 			out = (uchar3 *)realloc(out, width * height * sizeof(uchar3));
 		}
-		// Khởi tạo tempGrayscale
-		uint32_t *temp_grayscale = (uint32_t *)malloc(width * height * sizeof(uint32_t));
-
+		
+		// Chuyển anh sang grayscale
+		uint32_t *grayscale = (uint32_t *)malloc(width * height * sizeof(uint32_t));
+		convertRgb2Gray(src_img, width, height, grayscale);
+		
 		// Tính toán ma trận Energy
 		uint32_t *importanceMatrix = (uint32_t *)malloc(width * height * sizeof(uint32_t));
 		calcPixelImportance(grayscale, width, height, importanceMatrix);
@@ -283,23 +326,24 @@ void seamCarvingByHost(uchar3 * inPixels, int width, int height, int nSeams, uch
 		
 		// Xoá đường seam ra khỏi bức ảnh gốc
 		removeSeam(src_img, width, height, seam, out);
-		// Xoá đường seam ra khỏi ảnh grayscale
-		removeSeamGray(grayscale, width, height, seam, temp_grayscale);
-		
 		src_img = out;
-		grayscale = temp_grayscale;
-
-		free(temp_grayscale);
+		free(grayscale);
 		free(importanceMatrix);
 		free(seam);
 		width--;
 	}
+
 	outPixels = (uchar3 *)malloc(expectWidth * height * sizeof(uchar3));
 	outPixels = out;
 	free(grayscale);
 	free(src_img);
 	free(out);
 }
+
+void seamCarvingByDevice(uchar3 * inPixels, int width, int height, int nSeams, uchar3*& outPixels){
+
+}
+
 
 int main(int argc, char ** argv)
 {
@@ -309,11 +353,20 @@ int main(int argc, char ** argv)
 	readPnm(argv[1], width, height, inPixels)	;
 	printf("\nImage size (width x height): %i x %i\n", width, height);
 
+	// Read number of seams to remove
 	int nSeams = atoi(argv[3]);
+
+	// Output image
 	uchar3* outPixels = NULL;
+
+    // seam carving using host
 	seamCarvingByHost(inPixels, width, height, nSeams, outPixels);
+	
+    // Write output image to file
 	char * outFileNameBase = strtok(argv[2], ".");
-	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_test.pnm"));
+	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_host.pnm"));
+	
+	// Free memories
 	free(inPixels);
 	free(outPixels);
 }

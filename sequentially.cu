@@ -282,11 +282,20 @@ int main(int argc, char ** argv)
 	readPnm(argv[1], width, height, inPixels)	;
 	printf("\nImage size (width x height): %i x %i\n", width, height);
 
+	// Read number of seams to remove
 	int nSeams = atoi(argv[3]);
+
+	// Output image
 	uchar3* outPixels = NULL;
+
+    // seam carving using host
 	seamCarvingByHost(inPixels, width, height, nSeams, outPixels);
+	
+    // Write results to files
 	char * outFileNameBase = strtok(argv[2], ".");
 	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_test.pnm"));
+	
+	// Free memories
 	free(inPixels);
 	free(outPixels);
 }

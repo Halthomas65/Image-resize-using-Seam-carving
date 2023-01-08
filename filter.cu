@@ -259,6 +259,7 @@ void blurImg(uchar3 * inPixels, int width, int height, float * filter, int filte
 		else if (kernelType == 2)
 		{
 			// TODO: call blurImgKernel2
+			blurImgKernel2<<<gridSize, blockSize, >>>(d_inPixels, width, height, d_filter, filterWidth, d_outPixels);
 
 		}
 		else
