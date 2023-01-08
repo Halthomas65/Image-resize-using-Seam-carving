@@ -138,26 +138,26 @@ void convertRgb2Gray(uchar3 *inPixels, int width, int height, uint32_t *outPixel
     }
 }
 
-void calConvolution(uint32_t *inPixels, int width, int height, uint32_t *outPixels, const int* filter)
+void calConvolution(uint32_t *inPixels, int width, int height, int32_t *outPixels, const int* filter)
 {
 	for (int outPixelsR = 0; outPixelsR < height; outPixelsR++)
 	{
 		for (int outPixelsC = 0; outPixelsC < width; outPixelsC++)
 		{
-			uint32_t outPixel = 0;
+			int32_t outPixel = 0;
 			for (int filterR = 0; filterR < FILTER_WIDTH; filterR++)
 			{
 				for (int filterC = 0; filterC < FILTER_WIDTH; filterC++)
 				{
-					float filterVal = filter[filterR*FILTER_WIDTH + filterC];
+					int filterVal = filter[filterR*FILTER_WIDTH + filterC];
 					int inPixelsR = outPixelsR - FILTER_WIDTH/2 + filterR;
 					int inPixelsC = outPixelsC - FILTER_WIDTH/2 + filterC;
 
 					inPixelsR = min(max(0, inPixelsR), height - 1);
 					inPixelsC = min(max(0, inPixelsC), width - 1);
 
-					uint32_t inPixel = inPixels[inPixelsR * width + inPixelsC];
-					outPixel += uint32_t(filterVal * inPixel);
+					int32_t inPixel = inPixels[inPixelsR * width + inPixelsC];
+					outPixel += filterVal * inPixel;
 				}
 			}
 			outPixels[outPixelsR*width + outPixelsC] = outPixel;
@@ -168,17 +168,16 @@ void calConvolution(uint32_t *inPixels, int width, int height, uint32_t *outPixe
 void calcPixelImportance(uint32_t *inPixels, int width, int height, uint32_t *importanceMatrix) 
 {   	
     // Phát hiện cạnh theo chiều x: Convolution với bộ lọc x-sobel
-    uint32_t *xEdge = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+    int32_t *xEdge = (int32_t*)malloc(width * height * sizeof(int32_t));
     calConvolution(inPixels, width, height, xEdge, xSobel);
 
     // Phát hiện cạnh theo chiều y: Convolution với bộ lọc y-sobel
-    uint32_t *yEdge = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+    int32_t *yEdge = (int32_t*)malloc(width * height * sizeof(int32_t));
     calConvolution(inPixels, width, height, yEdge, ySobel);
 
     // Tính độ quan trọng của một pixel
     for (int i = 0; i < width * height; i++)
-        importanceMatrix[i] = sqrt(xEdge[i]*xEdge[i] + yEdge[i]*yEdge[i]);
-        // importanceMatrix[i] = abs(xEdge[i]) + abs(yEdge[i]);
+        importanceMatrix[i] = abs(int(xEdge[i])) + abs(int(yEdge[i]));
 
     // Giải phóng vùng nhớ
     free(xEdge);
@@ -215,7 +214,7 @@ void findLeastImportantSeam(uint32_t *importanceMatrix, int width, int height, u
 			minValMatrix[r*width + c] += minValMatrix[(r+1)*width + (c + minpos)];
         }
     }
-	
+
 	// Truy vết và tìm seam ít quan trọng nhất
     seam[0] = 0;
     for (int i = 1; i < width; i++)
@@ -223,7 +222,11 @@ void findLeastImportantSeam(uint32_t *importanceMatrix, int width, int height, u
             seam[0] = i;
     for (int j = 1; j < height; j++)
         seam[j] = seam[j-1] + trackCol[(j-1)*width + seam[j-1]];
-
+	
+	for (int j = 1; j < height; j++){
+			printf("%i->", seam[j]);
+		}
+	printf("\n");
     // Free vùng nhớ
     free(trackCol);
 }
@@ -249,7 +252,7 @@ void seamCarvingByHost(uchar3 * inPixels, int width, int height, int nSeams, uch
 	int temp = width;
 	while (width > expectWidth) {
 		if (width < temp){
-			out = (uchar3 *)realloc(out, width * height * sizeof(uchar3));
+			out = (uchar3 *)realloc(out, (width - 1) * height * sizeof(uchar3));
 		}
 		// Chuyển anh sang grayscale
 		uint32_t *grayscale = (uint32_t *)malloc(width * height * sizeof(uint32_t));
@@ -279,23 +282,22 @@ int main(int argc, char ** argv)
 	// Read input image file
 	int width, height;
 	uchar3* inPixels = NULL;
-	readPnm(argv[1], width, height, inPixels)	;
+	readPnm(argv[1], width, height, inPixels);
 	printf("\nImage size (width x height): %i x %i\n", width, height);
 
-	// Read number of seams to remove
 	int nSeams = atoi(argv[3]);
-
-	// Output image
 	uchar3* outPixels = NULL;
 
-    // seam carving using host
+	// Đo thời gian chạy hàm seamCarvingByHost
+	GpuTimer timer;
+	timer.Start();
 	seamCarvingByHost(inPixels, width, height, nSeams, outPixels);
-	
-    // Write results to files
+	timer.Stop();
+	float time = timer.Elapsed();
+	printf("Host version - Number of seams = %i - Kernel time = %f ms\n", nSeams, time);
+
 	char * outFileNameBase = strtok(argv[2], ".");
 	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_test.pnm"));
-	
-	// Free memories
 	free(inPixels);
 	free(outPixels);
 }
