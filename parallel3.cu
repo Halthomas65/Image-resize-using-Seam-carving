@@ -3,8 +3,9 @@
 
 #define FILTER_WIDTH 3
 #define BLOCK_SIZE 32
-const int xSobel[FILTER_WIDTH*FILTER_WIDTH] = {1, 0, -1, 2, 0, -2, 1, 0, -1};
-const int ySobel[FILTER_WIDTH*FILTER_WIDTH] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
+// save filters into device constant memory
+__constant__  int d_xSobel[FILTER_WIDTH*FILTER_WIDTH] = {1, 0, -1, 2, 0, -2, 1, 0, -1};
+__constant__  int d_ySobel[FILTER_WIDTH*FILTER_WIDTH] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
 
 #define CHECK(call)\
 {\
@@ -141,8 +142,10 @@ __global__ void convertRgb2GrayKernel2(uchar3 *inPixels, int width, int height, 
 
 
 __global__ void calcPixelImportanceKernel(uint32_t* inPixels, int width, int height, 
-	uint32_t* outPixels, int* xSobelFilter, int* ySobelFilter)
-{   
+	uint32_t* outPixels)
+{ 
+	// TODO
+	// Use CMEM
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
 	int r = blockIdx.y * blockDim.y + threadIdx.y;
 	
@@ -154,8 +157,8 @@ __global__ void calcPixelImportanceKernel(uint32_t* inPixels, int width, int hei
 
 	for (int filterR = 0; filterR < FILTER_WIDTH; filterR++){
 		for (int filterC = 0; filterC < FILTER_WIDTH; filterC++){
-			int xSobelVal = xSobelFilter[filterR*FILTER_WIDTH + filterC];
-			int ySobelVal = ySobelFilter[filterR*FILTER_WIDTH + filterC];
+			int xSobelVal = d_xSobel[filterR*FILTER_WIDTH + filterC];
+			int ySobelVal = d_ySobel[filterR*FILTER_WIDTH + filterC];
 
 			int inPixelsR = (r - FILTER_WIDTH/2)  + filterR;
 			int inPixelsC = (c - FILTER_WIDTH/2) + filterC;
@@ -168,15 +171,9 @@ __global__ void calcPixelImportanceKernel(uint32_t* inPixels, int width, int hei
 			yEdge += ySobelVal * inPixel;
 		}
 	}
+	__syncthreads();
 	
 	outPixels[r * width + c] = fabsf(float(xEdge)) + fabsf(float(yEdge));
-}
-
-__global__ void calcPixelImportanceKernel2(uint32_t* inPixels, int width, int height, 
-	uint32_t* outPixels, int* xSobelFilter, int* ySobelFilter)
-{ 
-	// TODO
-	// Use SMEM
 }
 
 __global__ void calcPixelImportanceKernel3(uint32_t* inPixels, int width, int height, 
@@ -206,17 +203,33 @@ __global__ void calcMinValAndKeepTrackKernel(uint32_t* below_row, uint32_t* row,
 		trackRow[col] =  minpos;
 		row[col] += below_row[col + minpos];
 	}
+	__syncthreads();
 }
 
 // get Min Neighbour Position
-__global__ void calcMinValAndKeepTrackKernel(uint32_t* below_row, uint32_t* row, int* trackRow, int width){
+__global__ void calcMinValAndKeepTrackKernel2(uint32_t* below_row, uint32_t* row, int* trackRow, int width){
 	// TODO
 	// Use streams to overlap memory transfer and computation
 }
 
 
+__global__ void removeSeamKernel(uchar3 *inPixels, int width, int height, uint32_t *seam, uchar3 *outPixels)
+{
+	int c = blockIdx.x * blockDim.x + threadIdx.x;
+	int r = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (c >= width || r >= height){
+		return;
+	}
+	
+	if (c < seam[r])
+		outPixels[r*(width-1) + c] = inPixels[r*width + c];
+	else if (c > seam[r])
+		outPixels[r*(width-1) + c - 1] = inPixels[r*width + c];
+}
+
 // Remove Seam for both original image and grayscale image
-__global__ void removeSeamKernel(uchar3 *inPixels, uint32_t *grayscale int width, int height, uint32_t *seam, uchar3 *outPixels)
+__global__ void removeSeamKernel2(uchar3 *inPixels, uint32_t *grayscale, int width, int height, uint32_t *seam, uchar3 *outPixels)
 {
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
 	int r = blockIdx.y * blockDim.y + threadIdx.y;
@@ -225,7 +238,8 @@ __global__ void removeSeamKernel(uchar3 *inPixels, uint32_t *grayscale int width
 		return;
 	}
 
-	// create a temp grayscale output
+	// create a temp grayscale output to avoid overwriting the original grayscale output
+	// between threads in the same block
 	extern __shared__ uint32_t tmp_grayScale[];
 	
 	if (c < seam[r]){ // copy the pixels before the seam
@@ -244,14 +258,14 @@ __global__ void removeSeamKernel(uchar3 *inPixels, uint32_t *grayscale int width
 	grayscale[r*(width-1) + c] = tmp_grayScale[r*(width-1) + c];
 }
 
-__global__ void removeSeamKernel2(uchar3 *inPixels, int width, int height, uint32_t *seam, uchar3 *outPixels)
+__global__ void removeSeamKernel3(uchar3 *inPixels, int width, int height, uint32_t *seam, uchar3 *outPixels)
 {
 	// TODO
 	// Use streams to overlap memory transfer and computation
 }
 
 
-void seamCarvingByDevice1(uchar3 * inPixels, int width, int height, int nSeams, uchar3*& outPixels){
+void seamCarvingByDevice(uchar3 * inPixels, int width, int height, int nSeams, uchar3*& outPixels){
 	dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
 	dim3 blockSizeMinVal(BLOCK_SIZE);
 	dim3 gridSizeMinVal((width - 1) / blockSizeMinVal.x + 1);
@@ -259,37 +273,29 @@ void seamCarvingByDevice1(uchar3 * inPixels, int width, int height, int nSeams, 
 	uchar3 *out = (uchar3 *)malloc((width - 1) * height * sizeof(uchar3));
 	int expectWidth = width - nSeams;
 	int temp = width;
-
-	// Chuyển anh sang grayscale
-	uchar3* d_src;
-	uint32_t* d_grayscale;
-	CHECK(cudaMalloc(&d_src, width * height * sizeof(uchar3)));
-	CHECK(cudaMalloc(&d_grayscale, width * height * sizeof(uint32_t)));
-	CHECK(cudaMemcpy(d_src, src_img, width * height * sizeof(uchar3), cudaMemcpyHostToDevice));
-	convertRgb2GrayKernel<<<gridSize, blockSize>>>(d_src, width, height, d_grayscale);
-
 	while (width > expectWidth) {
 		if (width < temp){
 			out = (uchar3 *)realloc(out, (width - 1) * height * sizeof(uchar3));
 		}
 		dim3 gridSize((width - 1) / blockSize.x + 1, (height - 1) / blockSize.y + 1);
 
+		// Chuyển anh sang grayscale
+		uchar3* d_src;
+		uint32_t* d_grayscale;
+		CHECK(cudaMalloc(&d_src, width * height * sizeof(uchar3)));
+		CHECK(cudaMalloc(&d_grayscale, width * height * sizeof(uint32_t)));
+		CHECK(cudaMemcpy(d_src, src_img, width * height * sizeof(uchar3), cudaMemcpyHostToDevice));
+		convertRgb2GrayKernel<<<gridSize, blockSize>>>(d_src, width, height, d_grayscale);
+
 		// Tính toán ma trận Energy
 		uint32_t *d_importanceMatrix;
-		int* d_xSobel;
-		int* d_ySobel;
-		CHECK(cudaMalloc(&d_xSobel, 9 * sizeof(int)));
-		CHECK(cudaMalloc(&d_ySobel, 9 * sizeof(int)));
 		CHECK(cudaMalloc(&d_importanceMatrix, width * height * sizeof(uint32_t)));
-		CHECK(cudaMemcpy(d_xSobel, xSobel, 9 * sizeof(int), cudaMemcpyHostToDevice));
-		CHECK(cudaMemcpy(d_ySobel, ySobel, 9 * sizeof(int), cudaMemcpyHostToDevice));
-		calcPixelImportanceKernel<<<gridSize, blockSize>>>(d_grayscale, width, height, d_importanceMatrix, d_xSobel, d_ySobel);
+		calcPixelImportanceKernel<<<gridSize, blockSize>>>(d_grayscale, width, height, d_importanceMatrix);
 
 		// Tìm đường Seam ít quan trọng nhất
 		uint32_t* minValMatrix = (uint32_t*)malloc(width * height * sizeof(uint32_t));
 		int *trackCol = (int*)malloc(width * (height - 1) * sizeof(int));
 		CHECK(cudaMemcpy(minValMatrix, d_importanceMatrix, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost));
-		    // Tính độ quan trọng ít nhất của từng điểm từ trên xuống dưới
 		for (int r = height - 2; r >= 0; r--){
 			int offset = r * width;
 			uint32_t* d_row;
@@ -333,8 +339,6 @@ void seamCarvingByDevice1(uchar3 * inPixels, int width, int height, int nSeams, 
 		CHECK(cudaFree(d_src));
 		CHECK(cudaFree(d_grayscale));
 		CHECK(cudaFree(d_importanceMatrix));
-		CHECK(cudaFree(d_xSobel));
-		CHECK(cudaFree(d_ySobel));
 		CHECK(cudaFree(d_out));
 		CHECK(cudaFree(d_seam));
 		free(seam);
@@ -344,6 +348,7 @@ void seamCarvingByDevice1(uchar3 * inPixels, int width, int height, int nSeams, 
 	free(src_img);
 	free(out);
 }
+
 
 void printDeviceInfo()
 {
@@ -378,12 +383,12 @@ int main(int argc, char ** argv)
 	uchar3* outPixels = (uchar3 *)malloc((width - nSeams) * height * sizeof(uchar3));
 	GpuTimer timer;
 	timer.Start();
-	seamCarvingByDevice1(inPixels, width, height, nSeams, outPixels);
+	seamCarvingByDevice(inPixels, width, height, nSeams, outPixels);
 	timer.Stop();
 	float time = timer.Elapsed();
 	printf("Device version 1 - Number of seams = %i - Kernel time = %f ms\n", nSeams, time);
 	char * outFileNameBase = strtok(argv[2], ".");
-	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_test.pnm"));
+	writePnm(outPixels, width - nSeams, height, concatStr(outFileNameBase, "_kernel.pnm"));
 	free(inPixels);
 	free(outPixels);
 }

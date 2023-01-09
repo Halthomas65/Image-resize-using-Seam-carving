@@ -1,3 +1,6 @@
-1. Chuyển ảnh sang grayscale
-2. Tìm các cạnh = filter: left sobel + top sobel
-3. 
+1. In seamCarvingByDevice1, bring convertRgb2GrayKernel out of while loop to get 1 grayscale imgage only.
+    Reducing time to make it and delete it. 
+    Instead, change removeSeamKernel so that it works on both the original image and the grayscale one.
+    ==> Failed
+2. Bring filters to device constant memory
+    ==> Success
