@@ -13,7 +13,9 @@ Each member: What have you learned?
     - Finding a different way to upgrade the code
     - Synchronizing the threads 
     - Implementing the upgrading ideas
+    - Bad time management
    Learned: 
-    - Better use of SMEM and streams
+    - Understand seam algorithm
+    - Understand how to use cuda memory
     
 *** Đạt ***
